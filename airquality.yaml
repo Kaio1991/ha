@@ -1,29 +1,29 @@
 blueprint:
-  name: CO2 Luftqualität Benachrichtigung
+  name: CO2 Luftqualität Benachrichtigung (Multi-Sensor)
   description: >
-    Überwacht einen CO2-Sensor (ppm) und sendet eine Benachrichtigung an 1-x
-    Mobilgeräte, sobald der obere Grenzwert überschritten wird. Benachrichtigungen
-    werden nur innerhalb eines definierten Zeitfensters (z. B. 08:00–21:30 Uhr)
-    zugestellt. Sobald der Wert unter den unteren Grenzwert fällt, wird dieselbe
-    Benachrichtigung wieder entfernt (verschwindet auf dem Gerät).
-
-    Diese Blueprint einmal pro Luftqualitätsmessstation instanziieren
-    (Automatisierung -> Blueprint importieren -> für jeden Sensor eine eigene
-    Automatisierung anlegen).
+    Überwacht mehrere CO2-Sensoren (ppm) gleichzeitig innerhalb einer einzigen
+    Automatisierung und sendet eine Benachrichtigung an 1-x Mobilgeräte, sobald
+    der obere Grenzwert überschritten wird. Der Titel der Benachrichtigung
+    enthält automatisch den Namen der Messstation, die den Grenzwert
+    überschritten hat. Benachrichtigungen werden nur innerhalb eines
+    definierten Zeitfensters (z. B. 08:00–21:30 Uhr) zugestellt. Sobald der
+    jeweilige Sensor unter den unteren Grenzwert fällt, wird nur die zu diesem
+    Sensor gehörende Benachrichtigung wieder entfernt.
   domain: automation
   input:
-    co2_sensor:
-      name: CO2-Sensor
-      description: Sensor-Entität, die den CO2-Wert in ppm liefert.
+    co2_sensors:
+      name: CO2-Sensoren
+      description: Alle Sensor-Entitäten (Messstationen), die überwacht werden sollen.
       selector:
         entity:
           domain: sensor
+          multiple: true
 
     notify_devices:
       name: Zielgeräte
       description: >
         Ein oder mehrere Geräte (Home Assistant Companion App), an die die
-        Benachrichtigung gesendet werden soll.
+        Benachrichtigungen gesendet werden sollen. Gilt für alle Sensoren oben.
       selector:
         device:
           integration: mobile_app
@@ -65,30 +65,32 @@ blueprint:
 
     notification_title:
       name: Titel der Benachrichtigung
-      default: "⚠️ Luftqualität schlecht"
+      description: >
+        {{ trigger.to_state.name }} wird durch den Namen der Messstation
+        ersetzt, die den Grenzwert überschritten hat.
+      default: "⚠️ Luftqualität schlecht – {{ trigger.to_state.name }}"
       selector:
         text: {}
 
     notification_message:
       name: Nachrichtentext
       description: >
-        Der Platzhalter {{ trigger.to_state.state }} wird durch den aktuellen
-        CO2-Wert ersetzt.
+        {{ trigger.to_state.state }} wird durch den aktuellen CO2-Wert
+        ersetzt, {{ trigger.to_state.name }} durch den Stationsnamen.
       default: "CO2-Wert liegt bei {{ trigger.to_state.state }} ppm - bitte lüften!"
       selector:
         text: {}
 
 variables:
-  notification_tag: "co2_alert_{{ (input_co2_sensor | default('sensor')) | slugify }}"
-  input_co2_sensor: !input co2_sensor
+  notification_tag: "co2_alert_{{ trigger.entity_id | slugify }}"
 
 trigger:
   - trigger: numeric_state
-    entity_id: !input co2_sensor
+    entity_id: !input co2_sensors
     above: !input threshold_high
     id: "high"
   - trigger: numeric_state
-    entity_id: !input co2_sensor
+    entity_id: !input co2_sensors
     below: !input threshold_low
     id: "low"
 
@@ -115,8 +117,8 @@ action:
                       importance: high
                       priority: high
 
-      # Wert wieder unter unterem Grenzwert -> Benachrichtigung entfernen
-      # (unabhängig vom Zeitfenster, damit sie zuverlässig verschwindet)
+      # Wert wieder unter unterem Grenzwert -> nur die Benachrichtigung
+      # dieses einen Sensors entfernen (unabhängig vom Zeitfenster)
       - conditions:
           - condition: trigger
             id: "low"
@@ -130,4 +132,5 @@ action:
                     data:
                       tag: "{{ notification_tag }}"
 
-mode: single
+mode: parallel
+max_exceeded: silent
