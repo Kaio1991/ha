@@ -1,18 +1,14 @@
-
 blueprint:
   name: Geschirrspüler - iOS Live Activity
   description: >
-    Zeigt die Endzeit eines Geschirrspülers als iOS Live Activity an.
-    Die Endzeit wird aus einem Sensor im Format
-    "22. September 2026 um 14:46" gelesen.
-
+    Erstellt eine iOS Live Activity für einen Geschirrspüler.
+    Die Endzeit wird aus einem Sensor gelesen, der einen ISO-8601
+    Zeitstempel liefert, zum Beispiel 2026-09-23T12:42:34+00:00.
     Änderungen der Endzeit durch Home Connect aktualisieren die
     bestehende Live Activity.
-
-    Nach dem Ende des Programms wird die Live Activity entfernt
-    und eine normale Fertigmeldung gesendet.
-
-    Unterstützt ein optionales zweites iPhone.
+    Nach dem Ende wird die Live Activity beendet und eine normale
+    Fertigmeldung gesendet.
+    Ein zweites iPhone kann optional angegeben werden.
   domain: automation
   author: Kai
   homeassistant:
@@ -20,184 +16,107 @@ blueprint:
 
   input:
 
-    dishwasher_section:
-      name: Geschirrspüler
-      icon: mdi:dishwasher
-      description: Einstellungen für den Geschirrspüler.
-      collapsed: false
-      input:
-
-        end_time_sensor:
-          name: Endzeit-Sensor
-          description: >
-            Sensor mit der Home-Connect-Endzeit,
-            z. B. "22. September 2026 um 14:46".
-          selector:
-            entity:
-              filter:
-                - domain: sensor
-
-    notification_section:
-      name: Benachrichtigungen
-      icon: mdi:cellphone-message
+    end_time_sensor:
+      name: Endzeit-Sensor
       description: >
-        iOS-Gerät(e), auf denen die Live Activity und
-        die Fertigmeldung angezeigt werden.
-      collapsed: false
-      input:
+        Sensor mit der Endzeit des Geschirrspülers.
+      selector:
+        entity:
+          domain: sensor
 
-        primary_notify:
-          name: Haupt-iPhone
-          description: >
-            Notify-Entity des iPhones, auf dem die Live Activity
-            angezeigt werden soll.
-          selector:
-            entity:
-              filter:
-                - domain: notify
+    primary_notify:
+      name: Haupt-iPhone
+      description: >
+        Notify-Entity des ersten iPhones.
+      selector:
+        entity:
+          domain: notify
 
-        secondary_notify:
-          name: Zweites iPhone (optional)
-          description: >
-            Optionales weiteres Notify-Entity. Leer lassen,
-            wenn kein zweites iPhone verwendet werden soll.
-          default: []
-          selector:
-            entity:
-              multiple: true
-              filter:
-                - domain: notify
+    secondary_notify:
+      name: Zweites iPhone (optional)
+      description: >
+        Optionales zweites Notify-Entity.
+        Leer lassen, wenn kein zweites iPhone verwendet werden soll.
+      default: []
+      selector:
+        entity:
+          domain: notify
+          multiple: true
 
-    live_activity_section:
-      name: Live Activity
-      icon: mdi:progress-clock
-      description: Einstellungen für die iOS Live Activity.
-      collapsed: true
-      input:
+    activity_tag:
+      name: Live Activity Tag
+      description: >
+        Eindeutiger Name für die Live Activity.
+      default: geschirrspueler
+      selector:
+        text:
 
-        activity_tag:
-          name: Live-Activity Tag
-          description: >
-            Eindeutiger Tag für diese Live Activity.
-            Bei mehreren Geschirrspülern unterschiedliche Tags verwenden.
-          default: geschirrspueler
-          selector:
-            text:
+    notification_icon:
+      name: Symbol
+      description: >
+        Symbol für die Benachrichtigung.
+      default: mdi:dishwasher
+      selector:
+        icon:
 
-        notification_icon:
-          name: Symbol
-          description: Symbol für die Benachrichtigung.
-          default: mdi:dishwasher
-          selector:
-            icon:
+    completion_title:
+      name: Titel der Fertigmeldung
+      default: Geschirrspüler fertig
+      selector:
+        text:
 
-    completion_section:
-      name: Fertigmeldung
-      icon: mdi:check-circle
-      description: Einstellungen für die normale Benachrichtigung nach Programmende.
-      collapsed: true
-      input:
-
-        completion_title:
-          name: Titel
-          default: Geschirrspüler fertig
-          selector:
-            text:
-
-        completion_message:
-          name: Nachricht
-          default: Der Geschirrspüler ist fertig.
-          selector:
-            text:
+    completion_message:
+      name: Text der Fertigmeldung
+      default: Der Geschirrspüler ist fertig.
+      selector:
+        text:
 
 
 mode: restart
 max_exceeded: silent
 
+
 triggers:
 
-  # ------------------------------------------------------------
-  # Home Connect ändert die Endzeit
-  # ------------------------------------------------------------
   - trigger: state
     entity_id: !input end_time_sensor
-    id: endzeit_geaendert
 
-  # ------------------------------------------------------------
-  # Nach einem Home-Assistant-Neustart
-  # ------------------------------------------------------------
   - trigger: homeassistant
     event: start
-    id: homeassistant_start
 
 
 actions:
 
-  # ------------------------------------------------------------
-  # Eingaben als Variablen verfügbar machen
-  # ------------------------------------------------------------
   - variables:
       sensorwert: "{{ states(!input end_time_sensor) }}"
-
       primary_notify: !input primary_notify
       secondary_notify: !input secondary_notify
-
       activity_tag: !input activity_tag
       notification_icon: !input notification_icon
-
       completion_title: !input completion_title
       completion_message: !input completion_message
 
-  # ------------------------------------------------------------
-  # Deutsches Datum parsen
-  #
-  # Beispiel:
-  # 22. September 2026 um 14:46
-  #
-  # wird zunächst zu:
-  # 22. 09 2026 14:46
-  # ------------------------------------------------------------
-  - variables:
-      datum_text: >-
-        {% set ns = namespace(wert=sensorwert | lower) %}
-        {% set monate = {
-          'januar': '01',
-          'februar': '02',
-          'märz': '03',
-          'maerz': '03',
-          'april': '04',
-          'mai': '05',
-          'juni': '06',
-          'juli': '07',
-          'august': '08',
-          'september': '09',
-          'oktober': '10',
-          'november': '11',
-          'dezember': '12'
-        } %}
-        {% for monat, nummer in monate.items() %}
-          {% set ns.wert = ns.wert | replace(monat, nummer) %}
-        {% endfor %}
-        {{ ns.wert | replace(' um ', ' ') }}
 
+  - variables:
+      endzeit: >-
+        {% if sensorwert in ['unknown', 'unavailable', 'none', ''] %}
+          {{ none }}
+        {% else %}
+          {{ as_datetime(sensorwert, default=none) }}
+        {% endif %}
+
+
+  - variables:
       endzeit_ts: >-
-        {% if sensorwert not in ['unknown', 'unavailable', 'none', ''] %}
-          {{ as_timestamp(
-               strptime(
-                 datum_text,
-                 '%d. %m %Y %H:%M'
-               ),
-               default=0
-             ) | int(0) }}
+        {% if endzeit is not none %}
+          {{ as_timestamp(endzeit, default=0) | int }}
         {% else %}
           0
         {% endif %}
 
       jetzt_ts: "{{ as_timestamp(now()) | int }}"
 
-  # ------------------------------------------------------------
-  # Restzeit berechnen
-  # ------------------------------------------------------------
+
   - variables:
       rest_sekunden: >-
         {{ [endzeit_ts - jetzt_ts, 0] | max }}
@@ -210,21 +129,22 @@ actions:
         {% endif %}
 
 
-  # ============================================================
-  # GESCHIRRSPÜLER LÄUFT
-  # ============================================================
   - choose:
+
+      # ==========================================================
+      # GESCHIRRSPÜLER LÄUFT
+      # ==========================================================
 
       - conditions:
           - condition: template
-            value_template: >
-              {{ endzeit_ts > jetzt_ts }}
+            value_template: "{{ endzeit_ts > jetzt_ts }}"
 
         sequence:
 
           # ------------------------------------------------------
-          # Live Activity auf Haupt-iPhone starten/aktualisieren
+          # LIVE ACTIVITY - HAUPT-IPHON
           # ------------------------------------------------------
+
           - action: notify.send_message
             target:
               entity_id: "{{ primary_notify }}"
@@ -234,127 +154,92 @@ actions:
               data:
                 tag: "{{ activity_tag }}"
                 live_update: true
-
                 chronometer: true
                 when: "{{ rest_sekunden }}"
                 when_relative: true
-
                 notification_icon: "{{ notification_icon }}"
                 notification_icon_color: "#26C6DA"
-
                 progress_bar_direction: decreasing
-
                 url: "/lovelace/0"
 
 
           # ------------------------------------------------------
-          # Live Activity auf optionalem zweitem iPhone
+          # LIVE ACTIVITY - ZWEITES IPHONE
           # ------------------------------------------------------
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: >
-                      {{ secondary_notify | length > 0 }}
 
-                sequence:
+          - if:
+              - condition: template
+                value_template: "{{ secondary_notify | length > 0 }}"
+            then:
 
-                  - repeat:
-                      for_each: "{{ secondary_notify }}"
-                      sequence:
+              - repeat:
+                  for_each: "{{ secondary_notify }}"
+                  sequence:
 
-                        - action: notify.send_message
-                          target:
-                            entity_id: "{{ repeat.item }}"
-                          data:
-                            title: "Geschirrspüler"
-                            message: "Fertig um {{ endzeit_formatiert }} Uhr"
-                            data:
-                              tag: "{{ activity_tag }}"
-                              live_update: true
-
-                              chronometer: true
-                              when: "{{ rest_sekunden }}"
-                              when_relative: true
-
-                              notification_icon: "{{ notification_icon }}"
-                              notification_icon_color: "#26C6DA"
-
-                              progress_bar_direction: decreasing
-
-                              url: "/lovelace/0"
+                    - action: notify.send_message
+                      target:
+                        entity_id: "{{ repeat.item }}"
+                      data:
+                        title: "Geschirrspüler"
+                        message: "Fertig um {{ endzeit_formatiert }} Uhr"
+                        data:
+                          tag: "{{ activity_tag }}"
+                          live_update: true
+                          chronometer: true
+                          when: "{{ rest_sekunden }}"
+                          when_relative: true
+                          notification_icon: "{{ notification_icon }}"
+                          notification_icon_color: "#26C6DA"
+                          progress_bar_direction: decreasing
+                          url: "/lovelace/0"
 
 
           # ------------------------------------------------------
-          # Warten bis zur aktuellen Endzeit
-          #
-          # Wird die Endzeit durch Home Connect geändert,
-          # startet die Automation wegen mode: restart neu.
+          # BIS ZUR ENDZEIT WARTEN
           # ------------------------------------------------------
+
           - delay:
               seconds: "{{ rest_sekunden }}"
 
 
           # ------------------------------------------------------
-          # Aktuelle Endzeit nach dem Warten erneut auslesen.
-          #
-          # Dadurch wird verhindert, dass eine alte Endzeit
-          # eine Fertigmeldung erzeugt, wenn Home Connect das
-          # Programm zwischenzeitlich verlängert hat.
+          # AKTUELLEN SENSORWERT ERNEUT AUSLESEN
           # ------------------------------------------------------
-          - variables:
-              aktueller_sensorwert: >
-                {{ states(!input end_time_sensor) }}
 
           - variables:
-              aktuelles_datum_text: >-
-                {% set ns = namespace(wert=aktueller_sensorwert | lower) %}
-                {% set monate = {
-                  'januar': '01',
-                  'februar': '02',
-                  'märz': '03',
-                  'maerz': '03',
-                  'april': '04',
-                  'mai': '05',
-                  'juni': '06',
-                  'juli': '07',
-                  'august': '08',
-                  'september': '09',
-                  'oktober': '10',
-                  'november': '11',
-                  'dezember': '12'
-                } %}
-                {% for monat, nummer in monate.items() %}
-                  {% set ns.wert = ns.wert | replace(monat, nummer) %}
-                {% endfor %}
-                {{ ns.wert | replace(' um ', ' ') }}
+              aktueller_sensorwert: "{{ states(!input end_time_sensor) }}"
 
+          - variables:
+              aktuelle_endzeit: >-
+                {% if aktueller_sensorwert in ['unknown', 'unavailable', 'none', ''] %}
+                  {{ none }}
+                {% else %}
+                  {{ as_datetime(aktueller_sensorwert, default=none) }}
+                {% endif %}
+
+          - variables:
               aktuelle_endzeit_ts: >-
-                {% if aktueller_sensorwert not in ['unknown', 'unavailable', 'none', ''] %}
-                  {{ as_timestamp(
-                       strptime(
-                         aktuelles_datum_text,
-                         '%d. %m %Y %H:%M'
-                       ),
-                       default=0
-                     ) | int(0) }}
+                {% if aktuelle_endzeit is not none %}
+                  {{ as_timestamp(aktuelle_endzeit, default=0) | int }}
                 {% else %}
                   0
                 {% endif %}
 
 
           # ------------------------------------------------------
-          # Nur wenn die aktuelle Endzeit tatsächlich erreicht
-          # wurde, Fertigmeldung senden.
+          # NUR BEI TATSÄCHLICHEM ENDE FORTFAHREN
           # ------------------------------------------------------
+
           - condition: template
             value_template: >
-              {{ aktuelle_endzeit_ts > 0 and
-                 aktuelle_endzeit_ts <= as_timestamp(now()) }}
+              {{ aktuelle_endzeit_ts > 0
+                 and aktuelle_endzeit_ts <= as_timestamp(now()) }}
 
 
           # ------------------------------------------------------
-          # Live Activity Haupt-iPhone entfernen
+          # LIVE ACTIVITY BEENDEN - HAUPT-IPHON
           # ------------------------------------------------------
+
           - action: notify.send_message
             target:
               entity_id: "{{ primary_notify }}"
@@ -365,32 +250,31 @@ actions:
 
 
           # ------------------------------------------------------
-          # Live Activity zweites iPhone entfernen
+          # LIVE ACTIVITY BEENDEN - ZWEITES IPHONE
           # ------------------------------------------------------
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: >
-                      {{ secondary_notify | length > 0 }}
 
-                sequence:
+          - if:
+              - condition: template
+                value_template: "{{ secondary_notify | length > 0 }}"
+            then:
 
-                  - repeat:
-                      for_each: "{{ secondary_notify }}"
-                      sequence:
+              - repeat:
+                  for_each: "{{ secondary_notify }}"
+                  sequence:
 
-                        - action: notify.send_message
-                          target:
-                            entity_id: "{{ repeat.item }}"
-                          data:
-                            message: "clear_notification"
-                            data:
-                              tag: "{{ activity_tag }}"
+                    - action: notify.send_message
+                      target:
+                        entity_id: "{{ repeat.item }}"
+                      data:
+                        message: "clear_notification"
+                        data:
+                          tag: "{{ activity_tag }}"
 
 
           # ------------------------------------------------------
-          # FERTIGMELDUNG Haupt-iPhone
+          # FERTIGMELDUNG - HAUPT-IPHON
           # ------------------------------------------------------
+
           - action: notify.send_message
             target:
               entity_id: "{{ primary_notify }}"
@@ -409,48 +293,45 @@ actions:
 
 
           # ------------------------------------------------------
-          # FERTIGMELDUNG optionales zweites iPhone
+          # FERTIGMELDUNG - ZWEITES IPHONE
           # ------------------------------------------------------
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: >
-                      {{ secondary_notify | length > 0 }}
 
-                sequence:
+          - if:
+              - condition: template
+                value_template: "{{ secondary_notify | length > 0 }}"
+            then:
 
-                  - repeat:
-                      for_each: "{{ secondary_notify }}"
-                      sequence:
+              - repeat:
+                  for_each: "{{ secondary_notify }}"
+                  sequence:
 
-                        - action: notify.send_message
-                          target:
-                            entity_id: "{{ repeat.item }}"
-                          data:
-                            title: "{{ completion_title }}"
-                            message: "{{ completion_message }}"
-                            data:
-                              notification_icon: "{{ notification_icon }}"
-                              notification_icon_color: "#26C6DA"
-                              url: "/lovelace/0"
-                              push:
-                                sound:
-                                  name: "default"
-                                  critical: 0
-                                  volume: 1.0
+                    - action: notify.send_message
+                      target:
+                        entity_id: "{{ repeat.item }}"
+                      data:
+                        title: "{{ completion_title }}"
+                        message: "{{ completion_message }}"
+                        data:
+                          notification_icon: "{{ notification_icon }}"
+                          notification_icon_color: "#26C6DA"
+                          url: "/lovelace/0"
+                          push:
+                            sound:
+                              name: "default"
+                              critical: 0
+                              volume: 1.0
 
 
-      # ============================================================
-      # KEINE GÜLTIGE / ZUKÜNFTIGE ENDZEIT
-      # ============================================================
+      # ==========================================================
+      # KEINE GÜLTIGE ENDZEIT
+      # ==========================================================
+
       - conditions:
           - condition: template
-            value_template: >
-              {{ endzeit_ts <= jetzt_ts }}
+            value_template: "{{ endzeit_ts <= jetzt_ts }}"
 
         sequence:
 
-          # Vorhandene Live Activity entfernen
           - action: notify.send_message
             target:
               entity_id: "{{ primary_notify }}"
@@ -459,23 +340,20 @@ actions:
               data:
                 tag: "{{ activity_tag }}"
 
-          # Optionales zweites iPhone
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: >
-                      {{ secondary_notify | length > 0 }}
 
-                sequence:
+          - if:
+              - condition: template
+                value_template: "{{ secondary_notify | length > 0 }}"
+            then:
 
-                  - repeat:
-                      for_each: "{{ secondary_notify }}"
-                      sequence:
+              - repeat:
+                  for_each: "{{ secondary_notify }}"
+                  sequence:
 
-                        - action: notify.send_message
-                          target:
-                            entity_id: "{{ repeat.item }}"
-                          data:
-                            message: "clear_notification"
-                            data:
-                              tag: "{{ activity_tag }}"
+                    - action: notify.send_message
+                      target:
+                        entity_id: "{{ repeat.item }}"
+                      data:
+                        message: "clear_notification"
+                        data:
+                          tag: "{{ activity_tag }}"
