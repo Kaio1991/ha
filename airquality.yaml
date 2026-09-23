@@ -1,0 +1,133 @@
+blueprint:
+  name: CO2 Luftqualität Benachrichtigung
+  description: >
+    Überwacht einen CO2-Sensor (ppm) und sendet eine Benachrichtigung an 1-x
+    Mobilgeräte, sobald der obere Grenzwert überschritten wird. Benachrichtigungen
+    werden nur innerhalb eines definierten Zeitfensters (z. B. 08:00–21:30 Uhr)
+    zugestellt. Sobald der Wert unter den unteren Grenzwert fällt, wird dieselbe
+    Benachrichtigung wieder entfernt (verschwindet auf dem Gerät).
+
+    Diese Blueprint einmal pro Luftqualitätsmessstation instanziieren
+    (Automatisierung -> Blueprint importieren -> für jeden Sensor eine eigene
+    Automatisierung anlegen).
+  domain: automation
+  input:
+    co2_sensor:
+      name: CO2-Sensor
+      description: Sensor-Entität, die den CO2-Wert in ppm liefert.
+      selector:
+        entity:
+          domain: sensor
+
+    notify_devices:
+      name: Zielgeräte
+      description: >
+        Ein oder mehrere Geräte (Home Assistant Companion App), an die die
+        Benachrichtigung gesendet werden soll.
+      selector:
+        device:
+          integration: mobile_app
+          multiple: true
+
+    threshold_high:
+      name: Oberer Grenzwert (ppm)
+      description: Ab diesem Wert wird die Benachrichtigung ausgelöst.
+      default: 1500
+      selector:
+        number:
+          min: 400
+          max: 5000
+          unit_of_measurement: ppm
+          mode: box
+
+    threshold_low:
+      name: Unterer Grenzwert (ppm)
+      description: Ab diesem Wert wird die Benachrichtigung wieder entfernt.
+      default: 1000
+      selector:
+        number:
+          min: 400
+          max: 5000
+          unit_of_measurement: ppm
+          mode: box
+
+    time_start:
+      name: Beginn Benachrichtigungszeitraum
+      default: "08:00:00"
+      selector:
+        time: {}
+
+    time_end:
+      name: Ende Benachrichtigungszeitraum
+      default: "21:30:00"
+      selector:
+        time: {}
+
+    notification_title:
+      name: Titel der Benachrichtigung
+      default: "⚠️ Luftqualität schlecht"
+      selector:
+        text: {}
+
+    notification_message:
+      name: Nachrichtentext
+      description: >
+        Der Platzhalter {{ trigger.to_state.state }} wird durch den aktuellen
+        CO2-Wert ersetzt.
+      default: "CO2-Wert liegt bei {{ trigger.to_state.state }} ppm - bitte lüften!"
+      selector:
+        text: {}
+
+variables:
+  notification_tag: "co2_alert_{{ (input_co2_sensor | default('sensor')) | slugify }}"
+  input_co2_sensor: !input co2_sensor
+
+trigger:
+  - trigger: numeric_state
+    entity_id: !input co2_sensor
+    above: !input threshold_high
+    id: "high"
+  - trigger: numeric_state
+    entity_id: !input co2_sensor
+    below: !input threshold_low
+    id: "low"
+
+action:
+  - choose:
+      # Grenzwert überschritten -> Benachrichtigung senden, aber nur im Zeitfenster
+      - conditions:
+          - condition: trigger
+            id: "high"
+          - condition: time
+            after: !input time_start
+            before: !input time_end
+        sequence:
+          - repeat:
+              for_each: !input notify_devices
+              sequence:
+                - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+                  data:
+                    title: !input notification_title
+                    message: !input notification_message
+                    data:
+                      tag: "{{ notification_tag }}"
+                      channel: "Luftqualität"
+                      importance: high
+                      priority: high
+
+      # Wert wieder unter unterem Grenzwert -> Benachrichtigung entfernen
+      # (unabhängig vom Zeitfenster, damit sie zuverlässig verschwindet)
+      - conditions:
+          - condition: trigger
+            id: "low"
+        sequence:
+          - repeat:
+              for_each: !input notify_devices
+              sequence:
+                - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+                  data:
+                    message: "clear_notification"
+                    data:
+                      tag: "{{ notification_tag }}"
+
+mode: single
