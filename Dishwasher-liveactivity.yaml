@@ -1,4 +1,4 @@
-```yaml
+
 blueprint:
   name: Geschirrspüler - iOS Live Activity
   description: >
@@ -479,4 +479,3 @@ actions:
                             message: "clear_notification"
                             data:
                               tag: "{{ activity_tag }}"
-```
