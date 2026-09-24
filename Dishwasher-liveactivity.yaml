@@ -1,14 +1,19 @@
 blueprint:
-  name: Geschirrspüler – iOS Live Activity
+  name: Geschirrspüler - iOS Live Activity
   description: >
-    Erstellt und aktualisiert eine iOS Live Activity für einen Geschirrspüler.
-    Die Endzeit wird nur aktualisiert, wenn sich die Fertigstellungsminute ändert.
-    Die Fertigmeldung wird unabhängig davon ausgelöst, sobald der
-    Betriebszustand auf "Fertig" wechselt.
+    Erstellt eine iOS Live Activity für den Geschirrspüler und sendet eine
+    Fertigmeldung, sobald der Betriebszustand auf "Fertig" wechselt.
+
+    Die Endzeit wird nur aktualisiert, wenn sich die Fertigstellungsminute
+    ändert. Dadurch werden sekundengenaue Änderungen von Home Connect
+    ignoriert.
+
+    Mehrere Mobile-App-Notify-Dienste können kommasepariert angegeben werden.
+
+    Die Dashboard-URL ist optional. Wenn sie leer bleibt, wird
+    /lovelace/0 verwendet.
   domain: automation
   author: Kai
-  homeassistant:
-    min_version: 2026.7.0
 
   input:
 
@@ -16,7 +21,7 @@ blueprint:
       name: Endzeit-Sensor
       description: >
         Sensor mit der erwarteten Endzeit des Geschirrspülers.
-        Erwartet einen ISO-8601-Zeitstempel.
+        Beispiel: sensor.geschirrspuler_programm_endzeit
       selector:
         entity:
           domain: sensor
@@ -25,31 +30,58 @@ blueprint:
       name: Betriebszustand-Sensor
       description: >
         Sensor für den Betriebszustand des Geschirrspülers.
-        Bei Zustand "Fertig" wird die Fertigmeldung ausgelöst.
+        Bei Änderung auf "Fertig" wird die Fertigmeldung ausgelöst.
       selector:
         entity:
           domain: sensor
 
-    notify_service:
-      name: iPhone Notify-Dienst
+    notify_services:
+      name: Mobile-App-Notify-Dienste
       description: >
-        Vollständiger Notify-Dienst des iPhones,
-        z.B. notify.mobile_app_iphone_17_von_kai
+        Ein oder mehrere Mobile-App-Notify-Dienste.
+        Mehrere Dienste bitte durch Kommas trennen.
+
+        Beispiel:
+        notify.mobile_app_iphone_17_von_kai,
+        notify.mobile_app_iphone_von_cathi
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+    dashboard_url:
+      name: Dashboard-URL
+      description: >
+        Relative URL der Dashboard-Sicht, die beim Antippen der
+        Live Activity bzw. Fertigmeldung geöffnet werden soll.
+        Beispiel: /dashboard-dashboard
+
+        Leer lassen, um /lovelace/0 zu verwenden.
+      default: ""
       selector:
         text:
 
     activity_tag:
       name: Live-Activity Tag
-      description: Eindeutiger Tag für die Live Activity.
+      description: >
+        Eindeutiger Tag für die Live Activity.
+        Nur Buchstaben, Zahlen, Bindestriche und Unterstriche verwenden.
       default: geschirrspueler
       selector:
         text:
 
     notification_icon:
       name: Benachrichtigungs-Symbol
+      description: Material Design Icon für die Benachrichtigung.
       default: mdi:dishwasher
       selector:
         text:
+
+    notification_icon_color:
+      name: Farbe des Benachrichtigungs-Symbols
+      default: "#26C6DA"
+      selector:
+        color_rgb:
 
     completion_title:
       name: Titel der Fertigmeldung
@@ -69,29 +101,50 @@ max_exceeded: silent
 
 triggers:
 
-  # ------------------------------------------------------------
+  # ============================================================
   # Home Connect aktualisiert die Endzeit
-  # ------------------------------------------------------------
+  # ============================================================
   - trigger: state
     entity_id: !input end_time_sensor
     id: endzeit
 
-  # ------------------------------------------------------------
+  # ============================================================
   # Home Assistant wurde gestartet
-  # ------------------------------------------------------------
+  # ============================================================
   - trigger: homeassistant
     event: start
     id: startup
 
-  # ------------------------------------------------------------
+  # ============================================================
   # Geschirrspüler meldet "Fertig"
-  # ------------------------------------------------------------
+  # ============================================================
   - trigger: state
     entity_id: !input operating_state_sensor
     to: "Fertig"
     id: fertig
 
 actions:
+
+  # ============================================================
+  # VARIABLEN
+  # ============================================================
+  - variables:
+      dashboard_url_input: !input dashboard_url
+      dashboard_url: >-
+        {% if dashboard_url_input | trim != '' %}
+          {{ dashboard_url_input | trim }}
+        {% else %}
+          /lovelace/0
+        {% endif %}
+
+      notify_service_list: >-
+        {% set services = (notify_services_input | default('')).split(',') %}
+        {{ services
+          | map('trim')
+          | reject('equalto', '')
+          | list }}
+
+      notify_services_input: !input notify_services
 
   # ============================================================
   # FERTIGMELDUNG
@@ -105,30 +158,36 @@ actions:
         sequence:
 
           # ------------------------------------------------------
-          # Live Activity löschen
+          # Live Activity auf allen Geräten löschen
           # ------------------------------------------------------
-          - action: "{{ notify_service }}"
-            data:
-              message: "clear_notification"
-              data:
-                tag: !input activity_tag
+          - repeat:
+              for_each: "{{ notify_service_list }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    message: "clear_notification"
+                    data:
+                      tag: !input activity_tag
 
           # ------------------------------------------------------
-          # Fertigmeldung senden
+          # Fertigmeldung an alle Geräte senden
           # ------------------------------------------------------
-          - action: "{{ notify_service }}"
-            data:
-              title: !input completion_title
-              message: !input completion_message
-              data:
-                notification_icon: !input notification_icon
-                notification_icon_color: "#26C6DA"
-                url: "/lovelace/0"
-                push:
-                  sound:
-                    name: "default"
-                    critical: 0
-                    volume: 1.0
+          - repeat:
+              for_each: "{{ notify_service_list }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: !input completion_title
+                    message: !input completion_message
+                    data:
+                      notification_icon: !input notification_icon
+                      notification_icon_color: !input notification_icon_color
+                      url: "{{ dashboard_url }}"
+                      push:
+                        sound:
+                          name: default
+                          critical: 0
+                          volume: 1.0
 
   # ============================================================
   # LIVE ACTIVITY
@@ -147,23 +206,28 @@ actions:
               sensorwert: >
                 {{ states(!input end_time_sensor) }}
 
-              endzeit: >
+              endzeit: >-
                 {% if sensorwert in ['unknown', 'unavailable', 'none', ''] %}
                   {{ none }}
                 {% else %}
                   {{ as_datetime(sensorwert, default=none) }}
                 {% endif %}
 
-              endzeit_ts: >
+              endzeit_ts: >-
                 {{ as_timestamp(endzeit, default=0) | int }}
 
-              jetzt_ts: >
+              jetzt_ts: >-
                 {{ as_timestamp(now()) | int }}
 
-              endzeit_formatiert: >
+              endzeit_formatiert: >-
                 {{ endzeit_ts | timestamp_custom('%H:%M') }}
 
-              minute_geaendert: >
+              # Prüfen, ob sich die Fertigstellungsminute geändert hat.
+              #
+              # Beispiel:
+              # 14:05:31 -> 14:05:52 = kein Update
+              # 14:05:52 -> 14:06:03 = Update
+              minute_geaendert: >-
                 {% if trigger.id == 'startup' %}
                   true
                 {% elif trigger.from_state is none or trigger.to_state is none %}
@@ -193,30 +257,31 @@ actions:
           # Nur bei Änderung der Fertigstellungsminute reagieren
           # ------------------------------------------------------
           - condition: template
-            value_template: >
-              {{ minute_geaendert | bool }}
+            value_template: "{{ minute_geaendert | bool }}"
 
           # ------------------------------------------------------
-          # Nur bei einer zukünftigen Endzeit Live Activity senden
+          # Nur wenn eine zukünftige Endzeit vorhanden ist
           # ------------------------------------------------------
           - condition: template
-            value_template: >
-              {{ endzeit_ts > jetzt_ts }}
+            value_template: "{{ endzeit_ts > jetzt_ts }}"
 
           # ------------------------------------------------------
-          # Live Activity starten / aktualisieren
+          # Live Activity an alle Geräte senden
           # ------------------------------------------------------
-          - action: "{{ notify_service }}"
-            data:
-              title: "Geschirrspüler"
-              message: "Fertig um {{ endzeit_formatiert }} Uhr"
-              data:
-                tag: !input activity_tag
-                live_update: true
-                chronometer: true
-                when: "{{ endzeit_ts - jetzt_ts }}"
-                when_relative: true
-                notification_icon: !input notification_icon
-                notification_icon_color: "#26C6DA"
-                progress_bar_direction: decreasing
-                url: "/lovelace/0"
+          - repeat:
+              for_each: "{{ notify_service_list }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: "Geschirrspüler"
+                    message: "Fertig um {{ endzeit_formatiert }} Uhr"
+                    data:
+                      tag: !input activity_tag
+                      live_update: true
+                      chronometer: true
+                      when: "{{ endzeit_ts - jetzt_ts }}"
+                      when_relative: true
+                      notification_icon: !input notification_icon
+                      notification_icon_color: !input notification_icon_color
+                      progress_bar_direction: decreasing
+                      url: "{{ dashboard_url }}"
