@@ -1,0 +1,66 @@
+blueprint:
+  name: Müll – Erinnerung für morgen
+  description: >
+    Sendet zur festgelegten Uhrzeit eine Push-Benachrichtigung für jeden
+    Mülltermin am nächsten Tag. Der Kalender, mehrere Notify-Entitäten
+    (z. B. Mobile Apps) und der Benachrichtigungszeitpunkt können ausgewählt werden.
+  domain: automation
+  author: ChatGPT
+
+  input:
+    calendar_entity:
+      name: Müllkalender
+      description: Kalender, aus dem die Mülltermine gelesen werden.
+      selector:
+        entity:
+          domain: calendar
+
+    notify_entities:
+      name: Mobile Endgeräte
+      description: >
+        Eine oder mehrere Notify-Entitäten, an die die Erinnerung gesendet wird.
+      selector:
+        entity:
+          domain: notify
+          multiple: true
+
+    notification_time:
+      name: Benachrichtigungszeitpunkt
+      description: Uhrzeit, zu der die Müll-Erinnerung gesendet werden soll.
+      default: "18:00:00"
+      selector:
+        time:
+
+triggers:
+  - trigger: time
+    at: !input notification_time
+
+variables:
+  calendar_entity: !input calendar_entity
+
+actions:
+  - action: calendar.get_events
+    target:
+      entity_id: !input calendar_entity
+    data:
+      start_date_time: >
+        {{ (now() + timedelta(days=1)).strftime('%Y-%m-%d') }} 00:00:00
+      end_date_time: >
+        {{ (now() + timedelta(days=1)).strftime('%Y-%m-%d') }} 23:59:59
+    response_variable: muell_events
+
+  - condition: template
+    value_template: >
+      {{ muell_events[calendar_entity].events | length > 0 }}
+
+  - repeat:
+      for_each: "{{ muell_events[calendar_entity].events }}"
+      sequence:
+        - action: notify.send_message
+          target:
+            entity_id: !input notify_entities
+          data:
+            title: "🗑️ Müll-Erinnerung"
+            message: "{{ repeat.item.summary }} wird morgen abgeholt"
+
+mode: single
