@@ -5,15 +5,17 @@ blueprint:
     Fertigmeldung, sobald der Betriebszustand auf "Fertig" wechselt.
 
     Die Endzeit wird nur aktualisiert, wenn sich die Fertigstellungsminute
-    ändert. Dadurch werden sekundengenaue Änderungen von Home Connect
-    ignoriert.
+    ändert. Sekundenänderungen von Home Connect werden ignoriert.
 
-    Mehrere Mobile-App-Notify-Dienste können kommasepariert angegeben werden.
+    Es können mehrere Notify-Entitäten ausgewählt werden. Die Live Activity
+    und die Fertigmeldung werden an alle ausgewählten Geräte gesendet.
 
-    Die Dashboard-URL ist optional. Wenn sie leer bleibt, wird
-    /lovelace/0 verwendet.
+    Die Dashboard-URL ist optional. Wenn sie leer bleibt, wird /lovelace/0
+    verwendet.
   domain: automation
   author: Kai
+  homeassistant:
+    min_version: 2026.7.0
 
   input:
 
@@ -35,25 +37,21 @@ blueprint:
         entity:
           domain: sensor
 
-    notify_services:
-      name: Mobile-App-Notify-Dienste
+    notify_entities:
+      name: Mobile-App-Geräte
       description: >
-        Ein oder mehrere Mobile-App-Notify-Dienste.
-        Mehrere Dienste bitte durch Kommas trennen.
-
-        Beispiel:
-        notify.mobile_app_iphone_17_von_kai,
-        notify.mobile_app_iphone_von_cathi
-      default: ""
+        Wähle eine oder mehrere Notify-Entitäten aus, an die die Live Activity
+        und die Fertigmeldung gesendet werden sollen.
       selector:
-        text:
-          multiline: true
+        entity:
+          domain: notify
+          multiple: true
 
     dashboard_url:
       name: Dashboard-URL
       description: >
         Relative URL der Dashboard-Sicht, die beim Antippen der
-        Live Activity bzw. Fertigmeldung geöffnet werden soll.
+        Benachrichtigung geöffnet werden soll.
         Beispiel: /dashboard-dashboard
 
         Leer lassen, um /lovelace/0 zu verwenden.
@@ -65,14 +63,14 @@ blueprint:
       name: Live-Activity Tag
       description: >
         Eindeutiger Tag für die Live Activity.
-        Nur Buchstaben, Zahlen, Bindestriche und Unterstriche verwenden.
       default: geschirrspueler
       selector:
         text:
 
     notification_icon:
       name: Benachrichtigungs-Symbol
-      description: Material Design Icon für die Benachrichtigung.
+      description: >
+        Material Design Icon für die Benachrichtigung.
       default: mdi:dishwasher
       selector:
         text:
@@ -130,21 +128,13 @@ actions:
   # ============================================================
   - variables:
       dashboard_url_input: !input dashboard_url
+
       dashboard_url: >-
         {% if dashboard_url_input | trim != '' %}
           {{ dashboard_url_input | trim }}
         {% else %}
           /lovelace/0
         {% endif %}
-
-      notify_service_list: >-
-        {% set services = (notify_services_input | default('')).split(',') %}
-        {{ services
-          | map('trim')
-          | reject('equalto', '')
-          | list }}
-
-      notify_services_input: !input notify_services
 
   # ============================================================
   # FERTIGMELDUNG
@@ -158,10 +148,10 @@ actions:
         sequence:
 
           # ------------------------------------------------------
-          # Live Activity auf allen Geräten löschen
+          # Live Activity auf allen ausgewählten Geräten löschen
           # ------------------------------------------------------
           - repeat:
-              for_each: "{{ notify_service_list }}"
+              for_each: !input notify_entities
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
@@ -170,10 +160,10 @@ actions:
                       tag: !input activity_tag
 
           # ------------------------------------------------------
-          # Fertigmeldung an alle Geräte senden
+          # Fertigmeldung an alle ausgewählten Geräte senden
           # ------------------------------------------------------
           - repeat:
-              for_each: "{{ notify_service_list }}"
+              for_each: !input notify_entities
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
@@ -224,7 +214,6 @@ actions:
 
               # Prüfen, ob sich die Fertigstellungsminute geändert hat.
               #
-              # Beispiel:
               # 14:05:31 -> 14:05:52 = kein Update
               # 14:05:52 -> 14:06:03 = Update
               minute_geaendert: >-
@@ -266,10 +255,10 @@ actions:
             value_template: "{{ endzeit_ts > jetzt_ts }}"
 
           # ------------------------------------------------------
-          # Live Activity an alle Geräte senden
+          # Live Activity an alle ausgewählten Geräte senden
           # ------------------------------------------------------
           - repeat:
-              for_each: "{{ notify_service_list }}"
+              for_each: !input notify_entities
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
