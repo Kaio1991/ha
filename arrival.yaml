@@ -11,7 +11,8 @@ blueprint:
     Person einen eigenen Travel-Time-Sensor verwenden
     (Origin = Handy der Person, Destination = zone.home).
   domain: automation
-  min_version: 2024.10.0
+  homeassistant:
+    min_version: 2024.10.0
   input:
     person:
       name: Person, die von der Arbeit heimfährt
