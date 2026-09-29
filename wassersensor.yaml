@@ -1,0 +1,109 @@
+blueprint:
+  name: "Wassersensor – Kritische Benachrichtigung"
+  description: >
+    Sendet eine kritische Mobile-App-Benachrichtigung, sobald ein ausgewählter
+    Wassersensor Wasser erkennt. Wassersensoren können entweder einzeln per
+    Mehrfachauswahl oder über ein Home-Assistant-Label ausgewählt werden.
+    Mehrere Mobile-App-Geräte können als Empfänger ausgewählt werden.
+  domain: automation
+
+  input:
+    sensor_source:
+      name: Überwachung
+      description: >
+        Auswahl, ob einzelne Wassersensoren oder ein Label verwendet werden.
+      selector:
+        select:
+          options:
+            - label: Einzelne Wassersensoren
+              value: entities
+            - label: Wassersensoren über Label
+              value: label
+
+    water_sensors:
+      name: Wassersensoren
+      description: >
+        Einen oder mehrere Wassersensoren auswählen.
+        Wird verwendet, wenn "Einzelne Wassersensoren" ausgewählt wurde.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: binary_sensor
+              device_class: moisture
+
+    water_sensor_label:
+      name: Wassersensor-Label
+      description: >
+        Label auswählen, dem die Wassersensoren direkt zugewiesen sind.
+        Wird verwendet, wenn "Wassersensoren über Label" ausgewählt wurde.
+      default: ""
+      selector:
+        label: {}
+
+    notify_devices:
+      name: Mobile-App-Geräte
+      description: >
+        Mehrere Mobile-App-Notify-Entitäten auswählen.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: notify
+              integration: mobile_app
+
+variables:
+  sensor_source: !input sensor_source
+  selected_sensors: !input water_sensors
+  selected_label: !input water_sensor_label
+  notify_devices: !input notify_devices
+
+mode: parallel
+max: 10
+
+triggers:
+  - trigger: event
+    event_type: state_changed
+
+conditions:
+  # Nur Zustandswechsel auf "on" auswerten.
+  - condition: template
+    value_template: >
+      {{ trigger.event.data.old_state is not none
+         and trigger.event.data.new_state is not none
+         and trigger.event.data.old_state.state != 'on'
+         and trigger.event.data.new_state.state == 'on' }}
+
+  # Nur ausgewählte Wassersensoren berücksichtigen.
+  - condition: template
+    value_template: >
+      {% set entity_id = trigger.event.data.entity_id %}
+
+      {% if sensor_source == 'entities' %}
+        {{ entity_id in selected_sensors }}
+
+      {% elif sensor_source == 'label' %}
+        {{ entity_id in label_entities(selected_label) }}
+
+      {% else %}
+        false
+      {% endif %}
+
+actions:
+  - repeat:
+      for_each: "{{ notify_devices }}"
+      sequence:
+        - action: "{{ repeat.item }}"
+          data:
+            title: "Wasser erkannt, bitte prüfen"
+            message: >
+              Wasser wurde erkannt bei
+              {{ trigger.event.data.new_state.name }}.
+            data:
+              push:
+                interruption-level: critical
+                sound:
+                  name: default
+                  critical: 1
+                  volume: 1.0
