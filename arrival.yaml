@@ -1,0 +1,155 @@
+blueprint:
+  name: ETA-Info beim Verlassen der Arbeit
+  description: >
+    Sobald eine Person die Arbeitszone verlässt, wird die voraussichtliche
+    Ankunftszeit anhand der aktuellen Verkehrslage (Waze/Google Travel Time
+    Sensor) berechnet und per Push-Nachricht über die Home Assistant
+    Companion App an den jeweils anderen geschickt.
+
+
+    Pro Person eine eigene Automation aus diesem Blueprint anlegen und pro
+    Person einen eigenen Travel-Time-Sensor verwenden
+    (Origin = Handy der Person, Destination = zone.home).
+  domain: automation
+  min_version: 2024.10.0
+  input:
+    person:
+      name: Person, die von der Arbeit heimfährt
+      description: Die Person, deren Zonenwechsel die Automation auslöst.
+      selector:
+        entity:
+          filter:
+            - domain: person
+
+    person_name:
+      name: Name in der Nachricht
+      description: Wie die Person in der Nachricht genannt werden soll (z. B. "Deine Frau", "Kai").
+      default: "Deine Frau"
+      selector:
+        text:
+
+    work_zone:
+      name: Arbeitszone
+      selector:
+        entity:
+          filter:
+            - domain: zone
+
+    travel_time_sensor:
+      name: Travel-Time-Sensor
+      description: >
+        Sensor der Person mit der Fahrzeit nach Hause in Minuten
+        (Waze Travel Time oder Google Maps Travel Time).
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+
+    notify_service:
+      name: Notify-Dienst des Empfängers (Companion App)
+      description: >
+        Vollständiger Dienstname des Handys, das benachrichtigt werden soll,
+        z. B. notify.mobile_app_handy_kai (auch eine Notify-Gruppe ist möglich).
+      selector:
+        text:
+
+    update_delay:
+      name: Wartezeit nach Sensor-Update (Sekunden)
+      description: Gibt dem Sensor Zeit, nach dem Verlassen der Zone einen frischen Wert zu holen.
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: s
+
+    weekdays:
+      name: Wochentage
+      default: [mon, tue, wed, thu, fri]
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: Montag
+              value: mon
+            - label: Dienstag
+              value: tue
+            - label: Mittwoch
+              value: wed
+            - label: Donnerstag
+              value: thu
+            - label: Freitag
+              value: fri
+            - label: Samstag
+              value: sat
+            - label: Sonntag
+              value: sun
+
+    time_after:
+      name: Aktiv ab
+      default: "12:00:00"
+      selector:
+        time:
+
+    time_before:
+      name: Aktiv bis
+      default: "21:00:00"
+      selector:
+        time:
+
+mode: single
+max_exceeded: silent
+
+variables:
+  person_name: !input person_name
+  work_zone: !input work_zone
+  travel_sensor: !input travel_time_sensor
+  notify_service: !input notify_service
+
+triggers:
+  - trigger: zone
+    entity_id: !input person
+    zone: !input work_zone
+    event: leave
+
+conditions:
+  - condition: time
+    weekday: !input weekdays
+    after: !input time_after
+    before: !input time_before
+
+actions:
+  - action: homeassistant.update_entity
+    target:
+      entity_id: !input travel_time_sensor
+
+  - delay:
+      seconds: !input update_delay
+
+  # Abbruch, wenn der Sensor keinen gültigen Wert liefert
+  - condition: template
+    value_template: "{{ states(travel_sensor) | is_number }}"
+
+  - variables:
+      minutes: "{{ states(travel_sensor) | float(0) | round(0) | int }}"
+      eta: "{{ (now() + timedelta(minutes=minutes)).strftime('%H:%M') }}"
+      zone_name: "{{ state_attr(work_zone, 'friendly_name') or 'die Arbeit' }}"
+      text: >-
+        {{ person_name }} hat die Zone {{ zone_name }} verlassen.
+        Ungefähre Ankunftszeit aufgrund der aktuellen Verkehrslage:
+        ca. {{ eta }} Uhr (Fahrzeit ca. {{ minutes }} Minuten).
+
+  - action: "{{ notify_service }}"
+    data:
+      title: "Ankunftszeit"
+      message: "{{ text }}"
+      data:
+        # Neue Meldung ersetzt die vorherige derselben Person
+        tag: "eta_{{ trigger.entity_id.split('.')[1] }}"
+        # Android: sofort zustellen
+        ttl: 0
+        priority: high
+        # iOS: Zustellung auch bei Fokus-Modus "Zeitkritisch"
+        push:
+          interruption-level: time-sensitive
