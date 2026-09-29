@@ -4,13 +4,21 @@ blueprint:
     Sobald eine Person die Arbeitszone verlässt, wird die voraussichtliche
     Ankunftszeit anhand der aktuellen Verkehrslage (Waze/Google Travel Time
     Sensor) berechnet und per Push-Nachricht über die Home Assistant
-    Companion App an den jeweils anderen geschickt.
+    Companion App an den Empfänger geschickt.
 
 
     Pro Person eine eigene Automation aus diesem Blueprint anlegen und pro
     Person einen eigenen Travel-Time-Sensor verwenden
     (Origin = Handy der Person, Destination = zone.home).
+
+
+    In Titel und Text stehen folgende Platzhalter zur Verfügung:
+    {{ person_name }} (Anzeigename der Person), {{ zone_name }} (Name der
+    Arbeitszone), {{ eta }} (Ankunftszeit als HH:MM) und {{ minutes }}
+    (Fahrzeit in Minuten).
   domain: automation
+  homeassistant:
+    min_version: 2024.10.0
   input:
     person:
       name: Person, die von der Arbeit heimfährt
@@ -19,13 +27,6 @@ blueprint:
         entity:
           filter:
             - domain: person
-
-    person_name:
-      name: Name in der Nachricht
-      description: Wie die Person in der Nachricht genannt werden soll (z. B. "Deine Frau", "Kai").
-      default: "Deine Frau"
-      selector:
-        text:
 
     work_zone:
       name: Arbeitszone
@@ -44,13 +45,29 @@ blueprint:
           filter:
             - domain: sensor
 
-    notify_service:
-      name: Notify-Dienst des Empfängers (Companion App)
-      description: >
-        Vollständiger Dienstname des Handys, das benachrichtigt werden soll,
-        z. B. notify.mobile_app_handy_kai (auch eine Notify-Gruppe ist möglich).
+    notify_device:
+      name: Empfänger (Handy mit Companion App)
+      description: Das Gerät, auf dem die Push-Nachricht ankommen soll.
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+
+    notification_title:
+      name: Titel der Nachricht
+      default: "Ankunftszeit"
       selector:
         text:
+
+    notification_message:
+      name: Text der Nachricht
+      default: >-
+        {{ person_name }} hat die Zone {{ zone_name }} verlassen.
+        Ungefähre Ankunftszeit aufgrund der aktuellen Verkehrslage:
+        ca. {{ eta }} Uhr (Fahrzeit ca. {{ minutes }} Minuten).
+      selector:
+        text:
+          multiline: true
 
     update_delay:
       name: Wartezeit nach Sensor-Update (Sekunden)
@@ -101,10 +118,12 @@ mode: single
 max_exceeded: silent
 
 variables:
-  person_name: !input person_name
+  person: !input person
   work_zone: !input work_zone
   travel_sensor: !input travel_time_sensor
-  notify_service: !input notify_service
+  notify_device: !input notify_device
+  person_name: "{{ state_attr(person, 'friendly_name') or person }}"
+  notify_service: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
 
 triggers:
   - trigger: zone
@@ -134,18 +153,14 @@ actions:
       minutes: "{{ states(travel_sensor) | float(0) | round(0) | int }}"
       eta: "{{ (now() + timedelta(minutes=minutes)).strftime('%H:%M') }}"
       zone_name: "{{ state_attr(work_zone, 'friendly_name') or 'die Arbeit' }}"
-      text: >-
-        {{ person_name }} hat die Zone {{ zone_name }} verlassen.
-        Ungefähre Ankunftszeit aufgrund der aktuellen Verkehrslage:
-        ca. {{ eta }} Uhr (Fahrzeit ca. {{ minutes }} Minuten).
 
   - action: "{{ notify_service }}"
     data:
-      title: "Ankunftszeit"
-      message: "{{ text }}"
+      title: !input notification_title
+      message: !input notification_message
       data:
         # Neue Meldung ersetzt die vorherige derselben Person
-        tag: "eta_{{ trigger.entity_id.split('.')[1] }}"
+        tag: "eta_{{ person.split('.')[1] }}"
         # Android: sofort zustellen
         ttl: 0
         priority: high
