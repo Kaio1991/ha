@@ -45,11 +45,12 @@ blueprint:
           filter:
             - domain: sensor
 
-    notify_device:
-      name: Empfänger (Handy mit Companion App)
-      description: Das Gerät, auf dem die Push-Nachricht ankommen soll.
+    notify_devices:
+      name: Empfänger (Handys mit Companion App)
+      description: Ein oder mehrere Geräte, auf denen die Push-Nachricht ankommen soll.
       selector:
         device:
+          multiple: true
           filter:
             - integration: mobile_app
 
@@ -121,9 +122,8 @@ variables:
   person: !input person
   work_zone: !input work_zone
   travel_sensor: !input travel_time_sensor
-  notify_device: !input notify_device
+  notify_devices: !input notify_devices
   person_name: "{{ state_attr(person, 'friendly_name') or person }}"
-  notify_service: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
 
 triggers:
   - trigger: zone
@@ -154,16 +154,21 @@ actions:
       eta: "{{ (now() + timedelta(minutes=minutes)).strftime('%H:%M') }}"
       zone_name: "{{ state_attr(work_zone, 'friendly_name') or 'die Arbeit' }}"
 
-  - action: "{{ notify_service }}"
-    data:
-      title: !input notification_title
-      message: !input notification_message
-      data:
-        # Neue Meldung ersetzt die vorherige derselben Person
-        tag: "eta_{{ person.split('.')[1] }}"
-        # Android: sofort zustellen
-        ttl: 0
-        priority: high
-        # iOS: Zustellung auch bei Fokus-Modus "Zeitkritisch"
-        push:
-          interruption-level: time-sensitive
+  - repeat:
+      for_each: "{{ notify_devices }}"
+      sequence:
+        # Schlägt ein Gerät fehl, bekommen die übrigen die Nachricht trotzdem
+        - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+          continue_on_error: true
+          data:
+            title: !input notification_title
+            message: !input notification_message
+            data:
+              # Neue Meldung ersetzt die vorherige derselben Person
+              tag: "eta_{{ person.split('.')[1] }}"
+              # Android: sofort zustellen
+              ttl: 0
+              priority: high
+              # iOS: Zustellung auch bei Fokus-Modus "Zeitkritisch"
+              push:
+                interruption-level: time-sensitive
