@@ -5,10 +5,12 @@ blueprint:
     Automatisierung und sendet eine Benachrichtigung an 1-x Mobilgeräte, sobald
     der obere Grenzwert überschritten wird. Der Titel der Benachrichtigung
     enthält automatisch den Namen der Messstation, die den Grenzwert
-    überschritten hat. Benachrichtigungen werden nur innerhalb eines
-    definierten Zeitfensters (z. B. 08:00–21:30 Uhr) zugestellt. Sobald der
-    jeweilige Sensor unter den unteren Grenzwert fällt, wird nur die zu diesem
-    Sensor gehörende Benachrichtigung wieder entfernt.
+    überschritten hat. Die Benachrichtigung wird erst ausgelöst, wenn der
+    Grenzwert über eine vorgegebene Zeitspanne hinweg durchgehend überschritten
+    bleibt (Unterdrückung kurzer Spitzen), und nur innerhalb eines definierten
+    Zeitfensters (z. B. 08:00–21:30 Uhr) zugestellt. Sobald der jeweilige
+    Sensor unter den unteren Grenzwert fällt, wird nur die zu diesem Sensor
+    gehörende Benachrichtigung wieder entfernt.
   domain: automation
   input:
     co2_sensors:
@@ -51,6 +53,17 @@ blueprint:
           unit_of_measurement: ppm
           mode: box
 
+    trigger_duration:
+      name: Mindestdauer der Überschreitung
+      description: >
+        Der obere Grenzwert muss für diese Dauer durchgehend überschritten
+        bleiben, bevor die Push-Benachrichtigung ausgelöst wird. Verhindert
+        Benachrichtigungen bei kurzen, einmaligen Ausreißern.
+      default:
+        minutes: 5
+      selector:
+        duration: {}
+
     time_start:
       name: Beginn Benachrichtigungszeitraum
       default: "08:00:00"
@@ -88,6 +101,7 @@ trigger:
   - trigger: numeric_state
     entity_id: !input co2_sensors
     above: !input threshold_high
+    for: !input trigger_duration
     id: "high"
   - trigger: numeric_state
     entity_id: !input co2_sensors
@@ -96,7 +110,7 @@ trigger:
 
 action:
   - choose:
-      # Grenzwert überschritten -> Benachrichtigung senden, aber nur im Zeitfenster
+      # Grenzwert dauerhaft überschritten -> Benachrichtigung senden, aber nur im Zeitfenster
       - conditions:
           - condition: trigger
             id: "high"
